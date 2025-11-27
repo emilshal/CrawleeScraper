@@ -1,15 +1,16 @@
-# Crawlee + Go Realtor.com Scraper
+# Crawlee + Go Scraper (practice target)
 
 This project is a small monorepo that combines:
 
 - A Go orchestration layer.
-- A Crawlee (Node.js) crawler used to scrape data from Realtor.com.
+- A Crawlee (Node.js) crawler.
 
 The idea is that Go owns configuration, scheduling, and persistence, while Crawlee
 handles all the heavy lifting around browser automation and crawling.
 
-> Note: This is only the layout. The actual Realtor.com scraping logic and
-> Go-to-Crawlee integration are left for the next steps.
+For development and learning, the Crawlee side is currently wired against
+[`https://books.toscrape.com/`](https://books.toscrape.com/), a site explicitly
+designed for web-scraping practice.
 
 ## Layout
 
@@ -40,7 +41,22 @@ The Crawlee project lives in `crawler/`:
 
 - `crawler/package.json` — Node project definition with Crawlee dependency.
 - `crawler/tsconfig.json` — TypeScript config targeting modern Node.
-- `crawler/src/main.ts` — Minimal `PlaywrightCrawler` stub hitting Realtor.com.
+- `crawler/src/main.ts` — `PlaywrightCrawler` targeting `books.toscrape.com`.
+
+Running the crawler:
+
+```bash
+cd crawler
+npm install           # once
+npm run build
+npm start             # prints NDJSON book listings to stdout
+```
+
+You can override the start URL with:
+
+```bash
+START_URL="https://books.toscrape.com/catalogue/page-2.html" npm start
+```
 
 Recommended next steps:
 
@@ -67,6 +83,7 @@ A simple integration approach:
      persists to a database or file.
 
 Once that’s in place, the Go binary (`realtor-scraper`) becomes your single
-entrypoint for managing and running Realtor.com crawls, while Crawlee remains
-fully focused on scraping behavior.
+entrypoint for managing and running crawls, while Crawlee remains fully focused
+on scraping behavior. You can later swap the Crawlee target from the practice
+site to a real data source that you are explicitly allowed to crawl or query.
 
