@@ -1,34 +1,26 @@
 import { PlaywrightCrawler } from 'crawlee';
 
-// Basic shape of the data we want per listing.
-export interface Listing {
-	address: string;
-	city: string;
-	state: string;
-	zip: string;
+// Basic shape of the data we want per book.
+export interface BookListing {
+	title: string;
 	price: number | null;
-	beds: number | null;
-	baths: number | null;
-	sqft: number | null;
+	availability: string | null;
+	rating: string | null;
 	url: string;
 }
 
-// NOTE: Please confirm this URL by performing a search on Realtor.com
-// for Fairfax, VA single-family homes and copying the URL from your browser,
-// then optionally overriding via the REALTOR_START_URL env var.
-const DEFAULT_START_URL =
-	'https://www.realtor.com/realestateandhomes-search/Fairfax_VA/type-single-family-home';
+// Default target: a practice site explicitly built for scraping.
+// Docs: https://books.toscrape.com/
+const DEFAULT_START_URL = 'https://books.toscrape.com/';
 
-// Selectors are educated guesses and may need tweaking based on the live site.
-// Inspect the listing cards in your browser devtools and adjust as needed.
+// Selectors for books.toscrape.com
 const SELECTORS = {
-	card: '[data-testid="property-card"], article', // fallback to <article> if data-testid changes
-	address: '[data-testid="property-address"]',
-	price: '[data-testid="property-price"]',
-	beds: '[data-testid="property-beds"]',
-	baths: '[data-testid="property-baths"]',
-	sqft: '[data-testid="property-sqft"]',
-	link: 'a[href*="/realestateandhomes-detail/"]',
+	card: '.product_pod',
+	title: 'h3 a',
+	price: '.price_color',
+	availability: '.availability',
+	rating: '.star-rating',
+	link: 'h3 a',
 } as const;
 
 function parseNumber(text: string | null | undefined): number | null {
@@ -40,12 +32,14 @@ function parseNumber(text: string | null | undefined): number | null {
 	return Number.isNaN(value) ? null : value;
 }
 
-export async function runRealtorCrawler() {
-	const startUrl = process.env.REALTOR_START_URL ?? DEFAULT_START_URL;
+export async function runBookCrawler() {
+	const startUrl = process.env.START_URL ?? DEFAULT_START_URL;
 
 	const crawler = new PlaywrightCrawler({
-		maxRequestsPerCrawl: 5, // keep low while developing; increase carefully
-		maxConcurrency: 2,
+		// Be very gentle: single request, no retries, single browser.
+		maxRequestsPerCrawl: 1,
+		maxConcurrency: 1,
+		maxRequestRetries: 0,
 		headless: true,
 
 		async requestHandler({ request, page, log }) {
@@ -56,64 +50,51 @@ export async function runRealtorCrawler() {
 
 			const listings = await page.$$eval(
 				SELECTORS.card,
-				(cards, selectors) => {
-					type Listing = {
-						address: string;
-						city: string;
-						state: string;
-						zip: string;
+				(cards: Element[], selectors: typeof SELECTORS) => {
+					type RawBook = {
+						title: string | null;
 						price: string | null;
-						beds: string | null;
-						baths: string | null;
-						sqft: string | null;
+						availability: string | null;
+						rating: string | null;
 						url: string;
 					};
 
 					const extractText = (el: Element | null): string | null =>
 						el?.textContent?.trim().replace(/\s+/g, ' ') ?? null;
 
-					const results: Listing[] = [];
+					const results: RawBook[] = [];
 
 					for (const card of cards) {
-						const addressRaw = extractText(
-							card.querySelector(selectors.address),
-						);
+						const titleEl = card.querySelector(selectors.title) as
+							| HTMLAnchorElement
+							| null;
+						const title = titleEl?.getAttribute('title') ?? titleEl?.textContent;
+
 						const priceRaw = extractText(card.querySelector(selectors.price));
-						const bedsRaw = extractText(card.querySelector(selectors.beds));
-						const bathsRaw = extractText(card.querySelector(selectors.baths));
-						const sqftRaw = extractText(card.querySelector(selectors.sqft));
+						const availabilityRaw = extractText(
+							card.querySelector(selectors.availability),
+						);
 
-						// Attempt to parse city/state/zip from a combined address if present.
-						let street = addressRaw ?? '';
-						let city = 'Fairfax';
-						let state = 'VA';
-						let zip = '';
-
-						if (addressRaw && addressRaw.includes(',')) {
-							const parts = addressRaw.split(',');
-							if (parts.length >= 3) {
-								street = parts[0].trim();
-								city = parts[1].trim() || city;
-								const stateZipParts = parts[2].trim().split(/\s+/);
-								if (stateZipParts[0]) state = stateZipParts[0];
-								if (stateZipParts[1]) zip = stateZipParts[1];
-							}
-						}
+						const ratingEl = card.querySelector(selectors.rating);
+						const ratingClass = ratingEl?.getAttribute('class') ?? '';
+						// classes like "star-rating Three"
+						const ratingMatch = ratingClass.match(
+							/(One|Two|Three|Four|Five)/i,
+						);
+						const rating = ratingMatch ? ratingMatch[1] : null;
 
 						const linkEl = card.querySelector<HTMLAnchorElement>(selectors.link);
-						const href = linkEl?.href ?? '';
+						const href = linkEl?.getAttribute('href') ?? '';
 						if (!href) continue;
 
+						const absoluteUrl = new URL(href, document.baseURI).href;
+
 						results.push({
-							address: street,
-							city,
-							state,
-							zip,
+							title: title?.trim() ?? null,
 							price: priceRaw,
-							beds: bedsRaw,
-							baths: bathsRaw,
-							sqft: sqftRaw,
-							url: href,
+							availability: availabilityRaw,
+							rating,
+							url: absoluteUrl,
 						});
 					}
 
@@ -122,17 +103,13 @@ export async function runRealtorCrawler() {
 				SELECTORS,
 			);
 
-			// Convert raw string fields into structured Listing objects and print NDJSON.
+			// Convert raw string fields into structured BookListing objects and print NDJSON.
 			for (const raw of listings) {
-				const listing: Listing = {
-					address: raw.address,
-					city: raw.city,
-					state: raw.state,
-					zip: raw.zip,
+				const listing: BookListing = {
+					title: raw.title ?? '',
 					price: parseNumber(raw.price),
-					beds: parseNumber(raw.beds),
-					baths: parseNumber(raw.baths),
-					sqft: parseNumber(raw.sqft),
+					availability: raw.availability,
+					rating: raw.rating,
 					url: raw.url,
 				};
 
@@ -147,9 +124,8 @@ export async function runRealtorCrawler() {
 
 // Allow running directly via `node dist/main.js` or `ts-node src/main.ts`.
 if (import.meta.url === `file://${process.argv[1]}`) {
-	runRealtorCrawler().catch((error) => {
+	runBookCrawler().catch((error) => {
 		console.error(error);
 		process.exit(1);
 	});
 }
-
